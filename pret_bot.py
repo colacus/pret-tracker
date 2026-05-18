@@ -22,7 +22,7 @@ def get_price():
     page = requests.get(URL, headers=headers)
     soup = BeautifulSoup(page.text, "html.parser")
 
-    price_text = soup.select_one(".price").get_text(strip=True)
+    price_text = soup.select_one(".price_num").get_text(strip=True)
     price = int(price_text.replace(".", "").replace("Lei", "").strip())
     return price
 
