@@ -2,38 +2,41 @@ name: Price Tracker
 
 on:
   schedule:
-    - cron: "0 * * * *" # rulează la fiecare oră
-  workflow_dispatch: # poți rula manual din GitHub UI
+    - cron: "*/30 * * * *"
+
+  workflow_dispatch:
 
 jobs:
-  check_price:
+  check-price:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: write # necesar pentru a salva last_price.json
-
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install requests beautifulsoup4
+        run: |
+          pip install cloudscraper beautifulsoup4
 
-      - name: Run price bot
+      - name: Restore price cache
+        uses: actions/cache/restore@v4
+        with:
+          path: price_state.json
+          key: price-state
+
+      - name: Run tracker
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: python pret_bot.py
 
-      - name: Salvează last_price.json în repo
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add last_price.json
-          git diff --staged --quiet || git commit -m "chore: actualizare pret [skip ci]"
-          git push
+      - name: Save price cache
+        uses: actions/cache/save@v4
+        with:
+          path: price_state.json
+          key: price-state-${{ github.run_id }}
