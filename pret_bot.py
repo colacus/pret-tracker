@@ -34,11 +34,11 @@ def get_price():
 
         page.goto(
             PRODUCT_URL,
-            wait_until="networkidle",
+            wait_until="domcontentloaded",
             timeout=60000
         )
-
-        page.wait_for_timeout(8000)
+        
+        page.wait_for_timeout(5000)
 
         possible_selectors = [
             ".product-price",
