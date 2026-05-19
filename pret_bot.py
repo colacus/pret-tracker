@@ -34,30 +34,70 @@ def get_price():
 
         page.goto(
             PRODUCT_URL,
-            wait_until="domcontentloaded",
+            wait_until="networkidle",
             timeout=60000
         )
 
-        page.wait_for_timeout(5000)
+        page.wait_for_timeout(8000)
 
-        content = page.content()
+        possible_selectors = [
+            ".product-price",
+            ".price",
+            ".ps-price",
+            "[data-price]",
+            ".selling-price",
+            ".product-price-current"
+        ]
+
+        price_text = None
+
+        for selector in possible_selectors:
+            try:
+                element = page.locator(selector).first
+
+                if element.count() > 0:
+                    text = element.inner_text().strip()
+
+                    if text:
+                        print(f"Selector gasit: {selector}")
+                        print(f"Text extras: {text}")
+
+                        price_text = text
+                        break
+
+            except Exception:
+                pass
+
+        if not price_text:
+            content = page.content()
+
+            print(content[:5000])
+
+            browser.close()
+
+            raise Exception("Pretul nu a fost gasit")
 
         browser.close()
 
-    matches = re.findall(
-        r'(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*Lei',
-        content
+    match = re.search(
+        r'(\d[\d\.\,]*)',
+        price_text
     )
 
-    if not matches:
-        raise Exception("Pretul nu a fost gasit")
+    if not match:
+        raise Exception(
+            f"Nu am putut extrage numarul din: {price_text}"
+        )
 
-    raw_price = matches[0]
+    raw_price = match.group(1)
 
-    normalized = raw_price.replace(".", "").replace(",", ".")
+    normalized = (
+        raw_price
+        .replace(".", "")
+        .replace(",", ".")
+    )
 
     return float(normalized)
-
 
 def load_last_price():
     if not os.path.exists(STATE_FILE):
