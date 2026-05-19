@@ -21,21 +21,22 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install cloudscraper beautifulsoup4
+          pip install playwright requests
+          playwright install chromium
 
-      - name: Restore price cache
+      - name: Restore state
         uses: actions/cache/restore@v4
         with:
           path: price_state.json
           key: price-state
 
-      - name: Run tracker
+      - name: Run bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: python pret_bot.py
 
-      - name: Save price cache
+      - name: Save state
         uses: actions/cache/save@v4
         with:
           path: price_state.json
