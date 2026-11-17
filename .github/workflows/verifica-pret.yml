@@ -3,7 +3,6 @@ name: Price Tracker
 on:
   schedule:
     - cron: "*/30 * * * *"
-
   workflow_dispatch:
 
 jobs:
@@ -22,13 +21,15 @@ jobs:
       - name: Install dependencies
         run: |
           pip install playwright requests
-          playwright install chromium
+          playwright install --with-deps chromium
 
       - name: Restore state
         uses: actions/cache/restore@v4
         with:
           path: price_state.json
-          key: price-state
+          key: price-state-${{ github.run_id }}
+          restore-keys: |
+            price-state-
 
       - name: Run bot
         env:
@@ -37,6 +38,7 @@ jobs:
         run: python pret_bot.py
 
       - name: Save state
+        if: always()
         uses: actions/cache/save@v4
         with:
           path: price_state.json
