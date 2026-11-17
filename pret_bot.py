@@ -56,23 +56,57 @@ def price_pcgarage(page):
     raise Exception("Pretul nu a fost gasit (pcgarage)")
 
 
+def to_float(value):
+    """'1699.99' / '1699,99' / '1.699,99' -> float"""
+    v = str(value).strip().replace("\u00a0", "").replace(" ", "")
+    if "," in v and "." in v:
+        v = v.replace(".", "").replace(",", ".")
+    elif "," in v:
+        v = v.replace(",", ".")
+    return float(v)
+
+
+def find_price_in_json(node):
+    """cauta recursiv 'price' / 'lowPrice' intr-un JSON-LD"""
+    if isinstance(node, dict):
+        for key in ("price", "lowPrice"):
+            if node.get(key) not in (None, ""):
+                try:
+                    return to_float(node[key])
+                except ValueError:
+                    pass
+        for v in node.values():
+            r = find_price_in_json(v)
+            if r is not None:
+                return r
+    elif isinstance(node, list):
+        for v in node:
+            r = find_price_in_json(v)
+            if r is not None:
+                return r
+    return None
+
+
+# numar + "lei"/"ron": 1.699,99 lei | 1699 Lei | 1 699 lei | 599,90 RON
+PRICE_RE = re.compile(
+    r"(\d{1,3}(?:[. \u00a0]\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:lei|ron)\b",
+    re.I,
+)
+
+
 def price_generic(page):
-    # 1) JSON-LD (cel mai stabil, daca exista)
-    for raw in page.locator('script[type="application/ld+json"]').all_inner_texts():
+    # 1) JSON-LD
+    scripts = page.locator('script[type="application/ld+json"]').all_inner_texts()
+    for raw in scripts:
         try:
-            data = json.loads(raw)
+            r = find_price_in_json(json.loads(raw))
         except Exception:
             continue
-        items = data if isinstance(data, list) else [data]
-        for item in items:
-            offers = item.get("offers") if isinstance(item, dict) else None
-            if isinstance(offers, list):
-                offers = offers[0] if offers else None
-            if isinstance(offers, dict) and offers.get("price"):
-                print(f"Pret din JSON-LD: {offers['price']}")
-                return float(str(offers["price"]).replace(",", "."))
+        if r is not None:
+            print(f"Pret din JSON-LD: {r}")
+            return r
 
-    # 2) meta tag
+    # 2) meta tag-uri
     for sel in ['meta[property="product:price:amount"]',
                 'meta[property="og:price:amount"]',
                 'meta[itemprop="price"]']:
@@ -81,15 +115,32 @@ def price_generic(page):
             val = el.get_attribute("content")
             if val:
                 print(f"Pret din {sel}: {val}")
-                return float(val.replace(",", "."))
+                return to_float(val)
 
-    # 3) fallback: primul "1.699,99 lei" din textul paginii
+    # 3) text: primul pret "xxx lei" care apare DUPA titlul produsului (h1)
     body = page.locator("body").inner_text()
-    m = re.search(r"(\d{1,3}(?:\.\d{3})*,\d{2})\s*lei", body)
+    h1 = ""
+    try:
+        h1 = page.locator("h1").first.inner_text().strip()
+    except Exception:
+        pass
+    start = body.find(h1) if h1 else -1
+    region = body[start:] if start >= 0 else body
+    m = PRICE_RE.search(region)
     if m:
         print(f"Pret din text: {m.group(0)}")
-        return parse_ro_price(m.group(1))
+        return to_float(m.group(1))
 
+    # nimic gasit -> afiseaza ce vede botul, ca sa putem repara
+    print("--- DEBUG: pretul nu a fost gasit ---")
+    print("Titlu pagina:", page.title())
+    print("h1:", h1)
+    print("Blocuri JSON-LD:", len(scripts))
+    print("Lungime text pagina:", len(body))
+    for mm in list(PRICE_RE.finditer(body))[:8]:
+        ctx = body[max(0, mm.start() - 40): mm.end() + 10].replace("\n", " | ")
+        print("  candidat:", ctx)
+    print("Inceput text pagina:", body[:600].replace("\n", " | "))
     raise Exception("Pretul nu a fost gasit (generic)")
 
 
@@ -105,11 +156,33 @@ def get_price(product):
         browser = p.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled",
+                  "--disable-http2",  # evita ERR_HTTP2_PROTOCOL_ERROR (Altex)
                   "--no-sandbox", "--disable-dev-shm-usage"],
         )
         try:
-            page = browser.new_page(user_agent=USER_AGENT, locale="ro-RO")
-            page.goto(product["url"], wait_until="domcontentloaded", timeout=60000)
+            ctx = browser.new_context(
+                user_agent=USER_AGENT,
+                locale="ro-RO",
+                viewport={"width": 1366, "height": 768},
+                extra_http_headers={"Accept-Language": "ro-RO,ro;q=0.9,en;q=0.8"},
+            )
+            ctx.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
+            page = ctx.new_page()
+
+            last_err = None
+            for attempt in range(1, 4):
+                try:
+                    page.goto(product["url"], wait_until="domcontentloaded", timeout=60000)
+                    break
+                except Exception as e:
+                    last_err = e
+                    print(f"Incercarea {attempt}/3 esuata: {str(e).splitlines()[0]}")
+                    page.wait_for_timeout(3000 * attempt)
+            else:
+                raise last_err
+
             page.wait_for_timeout(5000)
             price = extractor_for(product["url"])(page)
             return price, page.title().strip()
